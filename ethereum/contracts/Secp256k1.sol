@@ -13,8 +13,11 @@ contract Secp256k1 {
 
     // mulVerify returns true if `Q = s * G` on the secp256k1 curve
     // qKeccak is defined as uint256(keccak256(abi.encodePacked(qx, qy))
+    // The scalar must be in (0, m): mulmod reduces it, so s + m would also
+    // verify, and a client reading the secret unreduced gets the wrong key.
     function mulVerify(uint256 scalar, uint256 qKeccak) public pure returns (bool) {
+        if (scalar == 0 || scalar >= m) return false;
         address qRes = ecrecover(0, 27, bytes32(gx), bytes32(mulmod(scalar, gx, m)));
-        return uint160(qKeccak) == uint160(qRes);
+        return qRes != address(0) && uint160(qKeccak) == uint160(qRes);
     }
 }
