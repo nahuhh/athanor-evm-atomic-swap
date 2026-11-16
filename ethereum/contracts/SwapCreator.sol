@@ -74,15 +74,8 @@ contract SwapCreator is Secp256k1 {
         address swapCreator;
     }
 
-    event New(
-        bytes32 swapID,
-        bytes32 claimKey,
-        bytes32 refundKey,
-        uint256 timeout1,
-        uint256 timeout2,
-        address asset,
-        uint256 value
-    );
+    // New carries the whole Swap, which callers must pass back
+    event New(bytes32 swapID, Swap swap);
     event Ready(bytes32 indexed swapID);
     event Claimed(bytes32 indexed swapID, bytes32 indexed s);
     event Refunded(bytes32 indexed swapID, bytes32 indexed s);
@@ -204,15 +197,7 @@ contract SwapCreator is Secp256k1 {
         // ensure that we are not overriding an existing swap
         if (swaps[swapID] != Stage.INVALID) revert SwapAlreadyExists();
 
-        emit New(
-            swapID,
-            _claimCommitment,
-            _refundCommitment,
-            swap.timeout1,
-            swap.timeout2,
-            swap.asset,
-            swap.value
-        );
+        emit New(swapID, swap);
         swaps[swapID] = Stage.PENDING;
         return swapID;
     }
