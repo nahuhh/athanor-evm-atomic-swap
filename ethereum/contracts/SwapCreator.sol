@@ -48,9 +48,12 @@ contract SwapCreator is Secp256k1 {
         // timeout1 is the block timestamp before which Alice can call
         // either `setReady` or `refund`.
         uint256 timeout1;
-        // timeout2 is the block timestamp after which Bob cannot claim, only
-        // Alice can refund.
+        // timeout2 is the block timestamp from which Bob cannot claim and Alice
+        // can refund, until timeout3.
         uint256 timeout2;
+        // timeout3 is the block timestamp from which Alice cannot refund, and
+        // Bob can claim again.
+        uint256 timeout3;
         // asset is address(0) for EVM native currency swaps, or it is the
         // address of the token that Alice is providing.
         address asset;
@@ -90,7 +93,7 @@ contract SwapCreator is Secp256k1 {
     // thrown when the claimer parameter for `newSwap` is the zero address
     error InvalidClaimer();
 
-    // thrown when the timeout1 or timeout2 parameters for `newSwap` are zero
+    // thrown when a timeout duration parameter for `newSwap` is zero
     error InvalidTimeout();
 
     // thrown when msg.value of a `newSwap` transaction has the wrong value
@@ -121,12 +124,12 @@ contract SwapCreator is Secp256k1 {
     // the first timeout has not been reached
     error TooEarlyToClaim();
 
-    // thrown when trying to call `claim` on a swap where the second timeout has
-    // been reached
+    // thrown when trying to call `claim` on a swap between the second and
+    // third timeouts, when only Alice can refund
     error TooLateToClaim();
 
     // thrown when it's the counterparty's turn to claim and refunding is not
-    // allowed
+    // allowed, or timeout3 has been reached
     error NotTimeToRefund();
 
     // thrown when the provided secret does not match its expected public key
@@ -160,12 +163,16 @@ contract SwapCreator is Secp256k1 {
     //   _timeoutDuration2:
     //      duration, in seconds, between timeout1 and timeout2
     //
+    //   _timeoutDuration3:
+    //      duration, in seconds, between timeout2 and timeout3
+    //
     function newSwap(
         bytes32 _claimCommitment,
         bytes32 _refundCommitment,
         address payable _claimer,
         uint256 _timeoutDuration1,
         uint256 _timeoutDuration2,
+        uint256 _timeoutDuration3,
         address _asset,
         uint256 _value,
         uint256 _nonce
@@ -181,7 +188,8 @@ contract SwapCreator is Secp256k1 {
 
         if (_claimCommitment == 0 || _refundCommitment == 0) revert InvalidSwapKey();
         if (_claimer == address(0)) revert InvalidClaimer();
-        if (_timeoutDuration1 == 0 || _timeoutDuration2 == 0) revert InvalidTimeout();
+        if (_timeoutDuration1 == 0 || _timeoutDuration2 == 0 || _timeoutDuration3 == 0)
+            revert InvalidTimeout();
 
         Swap memory swap = Swap({
             owner: payable(msg.sender),
@@ -190,6 +198,7 @@ contract SwapCreator is Secp256k1 {
             claimer: _claimer,
             timeout1: block.timestamp + _timeoutDuration1,
             timeout2: block.timestamp + _timeoutDuration1 + _timeoutDuration2,
+            timeout3: block.timestamp + _timeoutDuration1 + _timeoutDuration2 + _timeoutDuration3,
             asset: _asset,
             value: _value,
             nonce: _nonce
@@ -215,9 +224,11 @@ contract SwapCreator is Secp256k1 {
         emit Ready(swapID);
     }
 
-    // Bob can call `claim` if either of these hold true:
+    // Bob can call `claim` if any of these hold true:
     // (1) Alice has set the swap to `ready` and it's before timeout1
     // (2) It is between timeout1 and timeout2
+    // (3) It is after timeout3, so Alice never refunded. Bob is paid and his
+    //     secret lets Alice take the funds he locked on the other chain.
     function claim(Swap memory _swap, bytes32 _secret) public {
         if (msg.sender != _swap.claimer) revert OnlySwapClaimer();
         _claim(_swap, _secret);
@@ -282,7 +293,8 @@ contract SwapCreator is Secp256k1 {
         if (swapStage == Stage.INVALID) revert InvalidSwap();
         if (swapStage == Stage.COMPLETED) revert SwapCompleted();
         if (block.timestamp < _swap.timeout1 && swapStage != Stage.READY) revert TooEarlyToClaim();
-        if (block.timestamp >= _swap.timeout2) revert TooLateToClaim();
+        if (block.timestamp >= _swap.timeout2 && block.timestamp < _swap.timeout3)
+            revert TooLateToClaim();
 
         verifySecret(_secret, _swap.claimCommitment);
         emit Claimed(swapID, _secret);
@@ -291,7 +303,7 @@ contract SwapCreator is Secp256k1 {
 
     // Alice can `refund` her swap funds:
     // - Before timeout1, unless she called `setReady`
-    // - After timeout2, independent of whether she called `setReady`
+    // - From timeout2 until timeout3, independent of whether she called `setReady`
     function refund(Swap memory _swap, bytes32 _secret) public {
         bytes32 swapID = keccak256(abi.encode(_swap));
         Stage swapStage = swaps[swapID];
@@ -302,6 +314,7 @@ contract SwapCreator is Secp256k1 {
             block.timestamp < _swap.timeout2 &&
             (block.timestamp >= _swap.timeout1 || swapStage == Stage.READY)
         ) revert NotTimeToRefund();
+        if (block.timestamp >= _swap.timeout3) revert NotTimeToRefund();
 
         verifySecret(_secret, _swap.refundCommitment);
         emit Refunded(swapID, _secret);
