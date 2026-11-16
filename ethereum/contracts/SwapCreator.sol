@@ -144,6 +144,9 @@ contract SwapCreator is Secp256k1 {
     // `claimRelayer` does not match the relayer hash in `RelaySwap`
     error InvalidRelayerAddress();
 
+    // thrown when sending the EVM's native currency to a recipient fails
+    error PayoutFailed();
+
     // `newSwap` creates a new Swap instance using the passed parameters and
     // locks Alice's native EVM currency or token asset in the contract. On
     // success, the swap ID is returned.
@@ -221,7 +224,7 @@ contract SwapCreator is Secp256k1 {
 
         if (_swap.asset == address(0)) {
             // Transfer the swap value as the EVM's native currency
-            _swap.claimer.transfer(_swap.value);
+            sendNative(_swap.claimer, _swap.value);
         } else {
             // Transfer the swap value as a token amount.
             // WARNING: this will FAIL for fee-on-transfer or rebasing tokens if
@@ -259,8 +262,8 @@ contract SwapCreator is Secp256k1 {
 
         // send ether to swap claimer, subtracting the relayer fee
         if (_relaySwap.swap.asset == address(0)) {
-            _relaySwap.swap.claimer.transfer(_relaySwap.swap.value - _relaySwap.fee);
-            payable(_relayer).transfer(_relaySwap.fee);
+            sendNative(_relaySwap.swap.claimer, _relaySwap.swap.value - _relaySwap.fee);
+            sendNative(_relayer, _relaySwap.fee);
         } else {
             // WARN: this will FAIL for fee-on-transfer or rebasing tokens if the token
             // transfer reverts (i.e. if this contract does not contain _swap.value tokens),
@@ -306,10 +309,18 @@ contract SwapCreator is Secp256k1 {
         // send asset back to swap owner
         swaps[swapID] = Stage.COMPLETED;
         if (_swap.asset == address(0)) {
-            _swap.owner.transfer(_swap.value);
+            sendNative(_swap.owner, _swap.value);
         } else {
             IERC20(_swap.asset).safeTransfer(_swap.owner, _swap.value);
         }
+    }
+
+    // `transfer` forwards a 2300 gas stipend, which fails for recipients with
+    // code: contract wallets, or EOAs delegated under EIP-7702. The stage is
+    // already COMPLETED, so reentering can't pay out twice.
+    function sendNative(address payable _to, uint256 _value) internal {
+        (bool ok, ) = _to.call{value: _value}("");
+        if (!ok) revert PayoutFailed();
     }
 
     function verifySecret(bytes32 _secret, bytes32 _hashedPubkey) internal pure {
