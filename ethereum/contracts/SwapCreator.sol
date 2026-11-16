@@ -302,7 +302,7 @@ contract SwapCreator is Secp256k1 {
     }
 
     // Alice can `refund` her swap funds:
-    // - Until timeout1, unless she called `setReady`
+    // - Before timeout1, unless she called `setReady`
     // - After timeout2, independent of whether she called `setReady`
     function refund(Swap memory _swap, bytes32 _secret) public {
         bytes32 swapID = keccak256(abi.encode(_swap));
@@ -312,7 +312,7 @@ contract SwapCreator is Secp256k1 {
         if (_swap.owner != msg.sender) revert OnlySwapOwner();
         if (
             block.timestamp < _swap.timeout2 &&
-            (block.timestamp > _swap.timeout1 || swapStage == Stage.READY)
+            (block.timestamp >= _swap.timeout1 || swapStage == Stage.READY)
         ) revert NotTimeToRefund();
 
         verifySecret(_secret, _swap.refundCommitment);
