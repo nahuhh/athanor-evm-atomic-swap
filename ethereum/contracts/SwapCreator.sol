@@ -16,8 +16,7 @@ contract SwapCreator is Secp256k1 {
     // to create and fund the swap. Alice sets Stage to READY, via `setReady`,
     // after verifying that funds are locked on the other chain. Bob cannot
     // claim the swap funds until Alice sets the swap Stage to READY. The Stage
-    // is set to COMPLETED when Bob claims directly via `claim` or indirectly
-    // via `claimRelayer`, or by Alice calling `refund`.
+    // is set to COMPLETED when Bob calls `claim` or Alice calls `refund`.
     enum Stage {
         INVALID,
         PENDING,
@@ -33,9 +32,7 @@ contract SwapCreator is Secp256k1 {
         // owner is the address of Alice, who initiates the swap by calling
         // `newSwap`. Only the owner is allowed to call `setReady` or `refund`.
         address payable owner;
-        // claimer is the address of Bob. Only the claimer can call `claim` or
-        // sign a RelaySwap object that `claimRelayer` will accept the signature
-        // for.
+        // claimer is the address of Bob. Only the claimer can call `claim`.
         address payable claimer;
         // claimCommitment is the Keccak-256 hash of the expected secp256k1
         // public key derived from the secret (private key) that Bob sends when
@@ -61,20 +58,6 @@ contract SwapCreator is Secp256k1 {
         uint256 value;
         // nonce is a random value chosen by Alice
         uint256 nonce;
-    }
-
-    // RelaySwap contains additional information required for relayed claim
-    // transactions. This entire structure is encoded and signed by the swap
-    // claimer, and the signature is passed to `claimRelayer`.
-    struct RelaySwap {
-        // swap specifies which swap is being claimed
-        Swap swap;
-        // fee is the wei amount paid to the relayer
-        uint256 fee;
-        // relayerHash Keccak-256 hash of (relayer's payout address || 4-byte salt)
-        bytes32 relayerHash;
-        // swapCreator is the address of the swap's contract
-        address swapCreator;
     }
 
     // New carries the whole Swap, which callers must pass back
@@ -109,8 +92,7 @@ contract SwapCreator is Secp256k1 {
     // thrown when the caller of `setReady` or `refund` is not the swap owner
     error OnlySwapOwner();
 
-    // thrown when the signer of the relayed transaction is not the swap's
-    // claimer
+    // thrown when the caller of `claim` is not the swap's claimer
     error OnlySwapClaimer();
 
     // thrown when trying to call `claim` or `refund` on an invalid swap
@@ -135,17 +117,6 @@ contract SwapCreator is Secp256k1 {
     // thrown when the provided secret does not match its expected public key
     // hash
     error InvalidSecret();
-
-    // thrown when the signature of a `RelaySwap` is invalid
-    error InvalidSignature();
-
-    // thrown when the SwapCreator address is a `RelaySwap` is not the address
-    // of this contract
-    error InvalidContractAddress();
-
-    // thrown when the hash of the relayer address and salt passed to
-    // `claimRelayer` does not match the relayer hash in `RelaySwap`
-    error InvalidRelayerAddress();
 
     // thrown when sending the EVM's native currency to a recipient fails
     error PayoutFailed();
@@ -243,47 +214,6 @@ contract SwapCreator is Secp256k1 {
             // contain _swap.value tokens), exposing Bob's secret while giving
             // him nothing.
             IERC20(_swap.asset).safeTransfer(_swap.claimer, _swap.value);
-        }
-    }
-
-    // Anyone can call `claimRelayer` if they receive a signed _relaySwap object
-    // from Bob. The same rules for when Bob can call `claim` apply here when a
-    // 3rd party relays a claim for Bob. This version of claiming transfers a
-    // _relaySwap.fee to _relayer. To prevent front-running, while not requiring
-    // Bob to know the relayer's payout address, Bob only signs a salted hash of
-    // the relayer's payout address in _relaySwap.relayerHash.
-    // Note: claimRelayer will revert if the swap value is less than the relayer
-    // fee; in that case, Bob must call claim directly.
-    function claimRelayer(
-        RelaySwap memory _relaySwap,
-        bytes32 _secret,
-        address payable _relayer,
-        uint32 _salt,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) public {
-        address signer = ecrecover(keccak256(abi.encode(_relaySwap)), v, r, s);
-        if (signer != _relaySwap.swap.claimer) revert InvalidSignature();
-        if (address(this) != _relaySwap.swapCreator) revert InvalidContractAddress();
-        if (keccak256(abi.encodePacked(_relayer, _salt)) != _relaySwap.relayerHash)
-            revert InvalidRelayerAddress();
-
-        _claim(_relaySwap.swap, _secret);
-
-        // send ether to swap claimer, subtracting the relayer fee
-        if (_relaySwap.swap.asset == address(0)) {
-            sendNative(_relaySwap.swap.claimer, _relaySwap.swap.value - _relaySwap.fee);
-            sendNative(_relayer, _relaySwap.fee);
-        } else {
-            // WARN: this will FAIL for fee-on-transfer or rebasing tokens if the token
-            // transfer reverts (i.e. if this contract does not contain _swap.value tokens),
-            // exposing Bob's secret while giving him nothing.
-            IERC20(_relaySwap.swap.asset).safeTransfer(
-                _relaySwap.swap.claimer,
-                _relaySwap.swap.value - _relaySwap.fee
-            );
-            IERC20(_relaySwap.swap.asset).safeTransfer(_relayer, _relaySwap.fee);
         }
     }
 
