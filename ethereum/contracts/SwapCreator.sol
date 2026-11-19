@@ -14,9 +14,9 @@ contract SwapCreator is Secp256k1 {
 
     // Stage represents the swap state. It is PENDING when `newSwap` is called
     // to create and fund the swap. Alice sets Stage to READY, via `setReady`,
-    // after verifying that funds are locked on the other chain. Bob cannot
-    // claim the swap funds until Alice sets the swap Stage to READY. The Stage
-    // is set to COMPLETED when Bob calls `claim` or Alice calls `refund`.
+    // after verifying that funds are locked on the other chain. Before
+    // timeout1, Bob can claim the swap funds only once the Stage is READY. The
+    // Stage is set to COMPLETED when Bob calls `claim` or Alice calls `refund`.
     enum Stage {
         INVALID,
         PENDING,
@@ -42,8 +42,8 @@ contract SwapCreator is Secp256k1 {
         // public key derived from the secret (private key) that Alice sends if
         // refunding.
         bytes32 refundCommitment;
-        // timeout1 is the block timestamp before which Alice can call
-        // either `setReady` or `refund`.
+        // timeout1 is the block timestamp before which Alice can refund if she
+        // hasn't called `setReady`, and from which Bob can claim without it.
         uint256 timeout1;
         // timeout2 is the block timestamp from which Bob cannot claim and Alice
         // can refund, until timeout3.
