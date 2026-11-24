@@ -35,6 +35,9 @@ contract SwapFactory is Secp256k1, IPayoutTo {
 
     mapping(bytes32 => Stage) public stage;
 
+    // The secret `claim` or `refund` revealed, readable without searching logs
+    mapping(bytes32 => bytes32) public secrets;
+
     address payable private transient _payoutTo;
 
     event Locked(bytes32 indexed swapID);
@@ -114,6 +117,7 @@ contract SwapFactory is Secp256k1, IPayoutTo {
             revert TooLateToClaim();
         verifySecret(_secret, _swap.claimCommitment);
         emit Claimed(id, _secret);
+        secrets[id] = _secret;
         payout(id, _swap.claimer);
     }
 
@@ -132,6 +136,7 @@ contract SwapFactory is Secp256k1, IPayoutTo {
         if (block.timestamp >= _swap.timeout3) revert NotTimeToRefund();
         verifySecret(_secret, _swap.refundCommitment);
         emit Refunded(id, _secret);
+        secrets[id] = _secret;
         payout(id, _swap.owner);
     }
 

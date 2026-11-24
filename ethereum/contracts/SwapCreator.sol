@@ -27,6 +27,10 @@ contract SwapCreator is Secp256k1 {
     // swaps maps from a swap ID to the swap's current Stage
     mapping(bytes32 => Stage) public swaps;
 
+    // secrets maps from a swap ID to the secret revealed by `claim` or
+    // `refund`, so the counterparty can read it without searching logs
+    mapping(bytes32 => bytes32) public secrets;
+
     // Swap stores the swap parameters, the hash of which forms the swap ID.
     struct Swap {
         // owner is the address of Alice, who initiates the swap by calling
@@ -229,6 +233,7 @@ contract SwapCreator is Secp256k1 {
         verifySecret(_secret, _swap.claimCommitment);
         emit Claimed(swapID, _secret);
         swaps[swapID] = Stage.COMPLETED;
+        secrets[swapID] = _secret;
     }
 
     // Alice can `refund` her swap funds:
@@ -251,6 +256,7 @@ contract SwapCreator is Secp256k1 {
 
         // send asset back to swap owner
         swaps[swapID] = Stage.COMPLETED;
+        secrets[swapID] = _secret;
         if (_swap.asset == address(0)) {
             sendNative(_swap.owner, _swap.value);
         } else {

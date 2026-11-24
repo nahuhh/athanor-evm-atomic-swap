@@ -128,6 +128,7 @@ contract SwapCreatorTest {
         uint256 before = claimer.balance;
         expect(tryClaim(s, CLAIM_KEY), claimResult, "claim");
         if (claimResult == 0) require(claimer.balance == before + VALUE, "claim paid");
+        expectSecret(s, claimResult == 0 ? CLAIM_KEY : 0);
 
         vm.warp(START);
         s = newSwap();
@@ -136,6 +137,11 @@ contract SwapCreatorTest {
         before = refundsReceived;
         expect(tryRefund(s, REFUND_KEY), refundResult, "refund");
         if (refundResult == 0) require(refundsReceived == before + VALUE, "refund paid");
+        expectSecret(s, refundResult == 0 ? REFUND_KEY : 0);
+    }
+
+    function expectSecret(SwapCreator.Swap memory s, uint256 secret) internal view {
+        require(sc.secrets(keccak256(abi.encode(s))) == bytes32(secret), "stored secret");
     }
 
     function checkWindows(bool ready) internal {
